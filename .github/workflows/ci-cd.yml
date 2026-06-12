@@ -1,37 +1,48 @@
 # =============================================================================
-# DEPLOY — full Git Flow with THREE environments
-#   push/merge to  develop     -> build -> deploy to DEV server      (automatic)
-#   push to        release/*    -> build -> deploy to STAGING server  (automatic)
-#   push/merge to  main         -> build -> deploy to PROD server     (manual approval)
+# CI/CD — ONE workflow that does both jobs:
 #
-# Flow: feature/* → develop (DEV) → QA → release/* (STAGING) → UAT → main (PROD)
+#   CI  (Continuous Integration): on every Pull Request -> build/test only.
+#       Make "build" a REQUIRED status check in branch protection so broken
+#       code can't be merged.
 #
-# Place at: .github/workflows/deploy.yml
+#   CD  (Continuous Deployment): on push/merge to a branch -> build ONCE, then
+#       promote the SAME artifact to the right server:
+#         push/merge to  develop     -> DEV server      (automatic)
+#         push to        release/*    -> STAGING server  (automatic)
+#         push/merge to  main         -> PROD server     (manual approval)
 #
-# ONE-TIME GITHUB SETUP (Settings → Environments):
-#   create "development", "staging", and "production"
-#     - on "production": add a Required reviewer (you) => the APPROVAL GATE
-#   Add these secrets PER ENVIRONMENT (Settings → Environments → <env> → Secrets):
-#       SSH_HOST  (server public IP)   SSH_USER  (ubuntu)   SSH_KEY (PRIVATE key)
+#   Flow: feature/* → develop (DEV) → QA → release/* (STAGING) → UAT → main (PROD)
+#
+#   Place at: .github/workflows/ci-cd.yml
+#
+#   ONE-TIME GITHUB SETUP (Settings → Environments):
+#     create "development", "staging", and "production"
+#       - on "production": add a Required reviewer (you) => the APPROVAL GATE
+#     Add these secrets PER ENVIRONMENT (Settings → Environments → <env> → Secrets):
+#         SSH_HOST  (server public IP)   SSH_USER  (ubuntu)   SSH_KEY (PRIVATE key)
 # =============================================================================
-name: Deploy Frontend
+name: CI/CD
 
 on:
+  pull_request:
+    branches: [develop, main]   # CI only: build/test before merge
   push:
     branches:
-      - develop               # -> DEV server
-      - 'release/**'          # -> STAGING server
-      - main                  # -> PROD server (approval)
-  workflow_dispatch:          # also allow manual runs
+      - develop                 # -> DEV server
+      - 'release/**'            # -> STAGING server
+      - main                    # -> PROD server (approval)
+  workflow_dispatch:            # allow manual runs
 
-# Avoid two deploys racing each other.
+# Avoid two deploys of the same branch racing each other.
 concurrency:
-  group: deploy-${{ github.ref }}
+  group: ci-cd-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
   # ----------------------------------------------------------------------------
-  # 1) BUILD ONCE — the same artifact is promoted to dev then prod (best practice)
+  # 1) BUILD ONCE — this is the CI check on PRs AND the artifact for deploys.
+  #    The same dist/ is promoted to dev -> staging -> prod (build-once best
+  #    practice). On a Pull Request this is the only job that runs.
   # ----------------------------------------------------------------------------
   build:
     runs-on: ubuntu-latest
@@ -51,8 +62,14 @@ jobs:
       - name: Install deps
         run: npm ci
 
-      - name: Build
-        run: npm run build          # outputs dist/
+      # - name: Lint            # uncomment when you add eslint
+      #   run: npm run lint
+
+      # - name: Test            # uncomment when you add tests
+      #   run: npm test
+
+      - name: Build (verifies the app compiles)
+        run: npm run build       # outputs dist/
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
@@ -61,7 +78,8 @@ jobs:
           path: app/dist
 
   # ----------------------------------------------------------------------------
-  # 2) DEPLOY TO DEV — only when the push was to `develop`. Automatic.
+  # 2) DEPLOY TO DEV — only on a push to `develop`. Automatic.
+  #    (On a Pull Request github.ref is refs/pull/* so this is skipped.)
   # ----------------------------------------------------------------------------
   deploy-dev:
     needs: build
@@ -137,8 +155,8 @@ jobs:
             echo "STAGING deploy complete."
 
   # ----------------------------------------------------------------------------
-  # 4) DEPLOY TO PROD — only when the push was to `main`. PAUSES for manual
-  #    approval (Required reviewer on the "production" environment).
+  # 4) DEPLOY TO PROD — only on a push to `main`. PAUSES for manual approval
+  #    (Required reviewer on the "production" environment).
   # ----------------------------------------------------------------------------
   deploy-prod:
     needs: build                  # build once; gate is the environment approval

@@ -20,7 +20,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: app
+        working-directory: moviestudioyt
     steps:
       - uses: actions/checkout@v4
 
@@ -29,7 +29,7 @@ jobs:
         with:
           node-version: '20'
           cache: 'npm'
-          cache-dependency-path: app/package-lock.json
+          cache-dependency-path: moviestudioyt/package-lock.json
 
       - name: Install deps
         run: npm ci
@@ -40,5 +40,5 @@ jobs:
       # - name: Test            # uncomment when you add tests
       #   run: npm test
 
-      - name: Build (verifies the app compiles)
+      - name: Build (verifies the moviestudioyt compiles)
         run: npm run build

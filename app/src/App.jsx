@@ -5,7 +5,7 @@ const envName = import.meta.env.VITE_ENV_NAME || 'local'
 export default function App() {
   return (
     <main style={{ fontFamily: 'system-ui', textAlign: 'center', marginTop: '15vh' }}>
-      <h1>🚀 CI/CD Frontend Demo</h1>
+      <h1>🚀 GitFlow CI/CD Frontend Demo</h1>
       <p>This page was built and deployed by a GitHub Actions pipeline.</p>
       <p style={{
         display: 'inline-block', padding: '8px 16px', borderRadius: 8,

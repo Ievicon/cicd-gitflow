@@ -37,7 +37,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: 03-deploy-frontend-to-vms/app
+        working-directory: app
     steps:
       - uses: actions/checkout@v4
 
@@ -46,7 +46,7 @@ jobs:
         with:
           node-version: '20'
           cache: 'npm'
-          cache-dependency-path: 03-deploy-frontend-to-vms/app/package-lock.json
+          cache-dependency-path: app/package-lock.json
 
       - name: Install deps
         run: npm ci
@@ -58,7 +58,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: dist
-          path: 03-deploy-frontend-to-vms/app/dist
+          path: app/dist
 
   # ----------------------------------------------------------------------------
   # 2) DEPLOY TO DEV — only when the push was to `develop`. Automatic.

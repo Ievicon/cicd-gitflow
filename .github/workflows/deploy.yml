@@ -1,0 +1,176 @@
+# =============================================================================
+# DEPLOY — full Git Flow with THREE environments
+#   push/merge to  develop     -> build -> deploy to DEV server      (automatic)
+#   push to        release/*    -> build -> deploy to STAGING server  (automatic)
+#   push/merge to  main         -> build -> deploy to PROD server     (manual approval)
+#
+# Flow: feature/* → develop (DEV) → QA → release/* (STAGING) → UAT → main (PROD)
+#
+# Place at: .github/workflows/deploy.yml
+#
+# ONE-TIME GITHUB SETUP (Settings → Environments):
+#   create "development", "staging", and "production"
+#     - on "production": add a Required reviewer (you) => the APPROVAL GATE
+#   Add these secrets PER ENVIRONMENT (Settings → Environments → <env> → Secrets):
+#       SSH_HOST  (server public IP)   SSH_USER  (ubuntu)   SSH_KEY (PRIVATE key)
+# =============================================================================
+name: Deploy Frontend
+
+on:
+  push:
+    branches:
+      - develop               # -> DEV server
+      - 'release/**'          # -> STAGING server
+      - main                  # -> PROD server (approval)
+  workflow_dispatch:          # also allow manual runs
+
+# Avoid two deploys racing each other.
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  # ----------------------------------------------------------------------------
+  # 1) BUILD ONCE — the same artifact is promoted to dev then prod (best practice)
+  # ----------------------------------------------------------------------------
+  build:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: 03-deploy-frontend-to-vms/app
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: 03-deploy-frontend-to-vms/app/package-lock.json
+
+      - name: Install deps
+        run: npm ci
+
+      - name: Build
+        run: npm run build          # outputs dist/
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: 03-deploy-frontend-to-vms/app/dist
+
+  # ----------------------------------------------------------------------------
+  # 2) DEPLOY TO DEV — only when the push was to `develop`. Automatic.
+  # ----------------------------------------------------------------------------
+  deploy-dev:
+    needs: build
+    if: github.ref == 'refs/heads/develop'
+    runs-on: ubuntu-latest
+    environment:
+      name: development           # uses the "development" env secrets
+    steps:
+      - name: Download build
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+
+      - name: Copy files to DEV VM
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          source: "dist/*"
+          target: "/tmp/frontend"
+          strip_components: 1
+
+      - name: Publish on DEV (nginx webroot)
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          script: |
+            sudo rm -rf /var/www/html/*
+            sudo cp -r /tmp/frontend/* /var/www/html/
+            sudo systemctl reload nginx
+            echo "DEV deploy complete."
+
+  # ----------------------------------------------------------------------------
+  # 3) DEPLOY TO STAGING — only for `release/*` branches. Automatic (for QA/UAT).
+  # ----------------------------------------------------------------------------
+  deploy-staging:
+    needs: build
+    if: startsWith(github.ref, 'refs/heads/release/')
+    runs-on: ubuntu-latest
+    environment:
+      name: staging               # uses the "staging" env secrets
+    steps:
+      - name: Download build
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+
+      - name: Copy files to STAGING VM
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          source: "dist/*"
+          target: "/tmp/frontend"
+          strip_components: 1
+
+      - name: Publish on STAGING (nginx webroot)
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          script: |
+            sudo rm -rf /var/www/html/*
+            sudo cp -r /tmp/frontend/* /var/www/html/
+            sudo systemctl reload nginx
+            echo "STAGING deploy complete."
+
+  # ----------------------------------------------------------------------------
+  # 4) DEPLOY TO PROD — only when the push was to `main`. PAUSES for manual
+  #    approval (Required reviewer on the "production" environment).
+  # ----------------------------------------------------------------------------
+  deploy-prod:
+    needs: build                  # build once; gate is the environment approval
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment:
+      name: production            # Required reviewer here = the APPROVAL GATE
+    steps:
+      - name: Download build
+        uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist
+
+      - name: Copy files to PROD VM
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          source: "dist/*"
+          target: "/tmp/frontend"
+          strip_components: 1
+
+      - name: Publish on PROD (nginx webroot)
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          script: |
+            sudo rm -rf /var/www/html/*
+            sudo cp -r /tmp/frontend/* /var/www/html/
+            sudo systemctl reload nginx
+            echo "PROD deploy complete."

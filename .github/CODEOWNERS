@@ -1,0 +1,14 @@
+# =============================================================================
+# CODEOWNERS — controls WHO must approve changes.
+#
+# Combined with branch protection "Require review from Code Owners", a PR to a
+# protected branch (e.g. main) cannot be merged unless one of the owners listed
+# here approves it. A random developer's approval no longer satisfies the rule.
+#
+# Format:  <path pattern>   @owner1 @owner2 ...
+# The LAST matching pattern wins.
+# =============================================================================
+
+# Everything in the repo is owned by the admin and the lead developer (reviewer).
+# Only these two accounts can give an approval that unblocks a merge to main.
+*   @princewillopah @princewillopah1

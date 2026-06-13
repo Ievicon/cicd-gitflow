@@ -34,7 +34,7 @@ export default function App() {
 
       <h1>Git Flow Promotion Demo</h1>
       <p className="subtitle">
-        The same build is promoted across environments by GitHub Actions.
+        The same build is promoted across environments by GitHub Actions and Princewill.
       </p>
 
       <div className="card">

@@ -1,43 +1,53 @@
 # =============================================================================
-# DEPLOY — full Git Flow with THREE environments
-#   push/merge to  develop     -> build -> deploy to DEV server      (automatic)
-#   push to        release/*    -> build -> deploy to STAGING server  (automatic)
-#   push/merge to  main         -> build -> deploy to PROD server     (manual approval)
+# CI/CD — ONE simple workflow for the Vite + React app in  app/  (npm)
 #
-# Flow: feature/* → develop (DEV) → QA → release/* (STAGING) → UAT → main (PROD)
+#   CI  (on Pull Request): build only -> verify the app compiles before merge.
+#       Make the "build" job a REQUIRED status check in branch protection.
 #
-# Place at: .github/workflows/deploy.yml
+#   CD  (on push/merge): build ONCE, then copy the SAME static files (dist/)
+#       to the right server's nginx web root and label that server's env:
+#         push/merge to  develop     -> DEV server      (automatic)
+#         push to        release/*    -> STAGING server  (automatic)
+#         push/merge to  main         -> PROD server     (manual approval)
 #
-# ONE-TIME GITHUB SETUP (Settings → Environments):
-#   create "development", "staging", and "production"
-#     - on "production": add a Required reviewer (you) => the APPROVAL GATE
-#   Add these secrets PER ENVIRONMENT (Settings → Environments → <env> → Secrets):
-#       SSH_HOST  (server public IP)   SSH_USER  (ubuntu)   SSH_KEY (PRIVATE key)
+#   Flow: feature/* → develop (DEV) → QA → release/* (STAGING) → UAT → main (PROD)
+#
+#   It's a STATIC site — nginx just serves the files. The SAME build is promoted
+#   to every server (build-once-deploy-many). Each server writes a tiny /env.js
+#   that tells the page which environment it is, so you can SEE the promotion.
+#
+#   ------------------------------------------------------------------------
+#   ONE-TIME GITHUB SETUP (Settings → Environments):
+#     create "development", "staging", and "production"
+#       - on "production": add a Required reviewer (you) = the APPROVAL GATE
+#     Add these secrets PER ENVIRONMENT (Settings → Environments → <env>):
+#         SSH_HOST  (server public IP)   SSH_USER  (ubuntu)   SSH_KEY (PRIVATE key)
 # =============================================================================
-name: Deploy Frontend
+name: CI/CD
 
 on:
+  pull_request:
+    branches: [develop, main]   # CI only: build before merge
   push:
     branches:
-      - develop               # -> DEV server
-      - 'release/**'          # -> STAGING server
-      - main                  # -> PROD server (approval)
-  workflow_dispatch:          # also allow manual runs
+      - develop                 # -> DEV server
+      - 'release/**'            # -> STAGING server
+      - main                    # -> PROD server (approval)
+  workflow_dispatch:
 
-# Avoid two deploys racing each other.
 concurrency:
-  group: deploy-${{ github.ref }}
+  group: ci-cd-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
   # ----------------------------------------------------------------------------
-  # 1) BUILD ONCE — the same artifact is promoted to dev then prod (best practice)
+  # 1) BUILD ONCE — CI check on PRs AND the artifact promoted to every server.
   # ----------------------------------------------------------------------------
   build:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: 03-deploy-frontend-to-vms/app
+        working-directory: app
     steps:
       - uses: actions/checkout@v4
 
@@ -46,29 +56,32 @@ jobs:
         with:
           node-version: '20'
           cache: 'npm'
-          cache-dependency-path: 03-deploy-frontend-to-vms/app/package-lock.json
+          cache-dependency-path: app/package-lock.json
 
       - name: Install deps
         run: npm ci
 
       - name: Build
-        run: npm run build          # outputs dist/
+        run: npm run build
+        env:
+          VITE_GIT_SHA: ${{ github.sha }}
+          VITE_BUILT_AT: ${{ github.event.repository.updated_at }}
 
       - name: Upload build artifact
         uses: actions/upload-artifact@v4
         with:
           name: dist
-          path: 03-deploy-frontend-to-vms/app/dist
+          path: app/dist
 
   # ----------------------------------------------------------------------------
-  # 2) DEPLOY TO DEV — only when the push was to `develop`. Automatic.
+  # 2) DEPLOY TO DEV — only on a push to `develop`. Automatic.
   # ----------------------------------------------------------------------------
   deploy-dev:
     needs: build
     if: github.ref == 'refs/heads/develop'
     runs-on: ubuntu-latest
     environment:
-      name: development           # uses the "development" env secrets
+      name: development
     steps:
       - name: Download build
         uses: actions/download-artifact@v4
@@ -95,18 +108,19 @@ jobs:
           script: |
             sudo rm -rf /var/www/html/*
             sudo cp -r /tmp/frontend/* /var/www/html/
+            echo "window.__ENV__='development';" | sudo tee /var/www/html/env.js
             sudo systemctl reload nginx
             echo "DEV deploy complete."
 
   # ----------------------------------------------------------------------------
-  # 3) DEPLOY TO STAGING — only for `release/*` branches. Automatic (for QA/UAT).
+  # 3) DEPLOY TO STAGING — only for `release/*` branches. Automatic (QA/UAT).
   # ----------------------------------------------------------------------------
   deploy-staging:
     needs: build
     if: startsWith(github.ref, 'refs/heads/release/')
     runs-on: ubuntu-latest
     environment:
-      name: staging               # uses the "staging" env secrets
+      name: staging
     steps:
       - name: Download build
         uses: actions/download-artifact@v4
@@ -133,19 +147,20 @@ jobs:
           script: |
             sudo rm -rf /var/www/html/*
             sudo cp -r /tmp/frontend/* /var/www/html/
+            echo "window.__ENV__='staging';" | sudo tee /var/www/html/env.js
             sudo systemctl reload nginx
             echo "STAGING deploy complete."
 
   # ----------------------------------------------------------------------------
-  # 4) DEPLOY TO PROD — only when the push was to `main`. PAUSES for manual
-  #    approval (Required reviewer on the "production" environment).
+  # 4) DEPLOY TO PROD — only on a push to `main`. PAUSES for manual approval
+  #    (Required reviewer on the "production" environment).
   # ----------------------------------------------------------------------------
   deploy-prod:
-    needs: build                  # build once; gate is the environment approval
+    needs: build
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     environment:
-      name: production            # Required reviewer here = the APPROVAL GATE
+      name: production
     steps:
       - name: Download build
         uses: actions/download-artifact@v4
@@ -172,5 +187,6 @@ jobs:
           script: |
             sudo rm -rf /var/www/html/*
             sudo cp -r /tmp/frontend/* /var/www/html/
+            echo "window.__ENV__='production';" | sudo tee /var/www/html/env.js
             sudo systemctl reload nginx
             echo "PROD deploy complete."
